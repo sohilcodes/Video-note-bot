@@ -1,6 +1,2 @@
 pyTelegramBotAPI
 flask
-moviepy
-imageio
-imageio-ffmpeg
-numpy
