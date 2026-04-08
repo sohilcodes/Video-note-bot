@@ -1,10 +1,10 @@
 import os
 import telebot
 from flask import Flask, request
-from moviepy.editor import VideoFileClip
+import subprocess
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.onrender.com
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -22,25 +22,24 @@ def handle_video(msg):
     user_id = msg.chat.id
 
     file_info = bot.get_file(msg.video.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
+    file = bot.download_file(file_info.file_path)
 
     input_path = f"{user_id}_input.mp4"
     output_path = f"{user_id}_output.mp4"
 
-    with open(input_path, 'wb') as f:
-        f.write(downloaded_file)
+    with open(input_path, "wb") as f:
+        f.write(file)
 
-    clip = VideoFileClip(input_path)
-    size = min(clip.w, clip.h)
+    # 🔥 FFmpeg convert to square video note
+    cmd = [
+        "ffmpeg",
+        "-i", input_path,
+        "-vf", "crop='min(iw,ih)':min(iw,ih),scale=360:360",
+        "-c:a", "copy",
+        output_path
+    ]
 
-    clip = clip.crop(
-        x_center=clip.w/2,
-        y_center=clip.h/2,
-        width=size,
-        height=size
-    ).resize((360, 360))
-
-    clip.write_videofile(output_path, codec='libx264')
+    subprocess.run(cmd)
 
     user_data[user_id] = {
         "type": "video",
@@ -75,7 +74,7 @@ def send_final(msg):
         return
 
     if data["type"] == "video":
-        with open(data["path"], 'rb') as vid:
+        with open(data["path"], "rb") as vid:
             bot.send_video_note(user_id, vid, length=360)
 
         os.remove(data["path"])
@@ -85,25 +84,21 @@ def send_final(msg):
         bot.send_video_note(user_id, data["file_id"])
 
     bot.send_message(user_id, f"📝 Caption:\n{caption}")
-
     user_data.pop(user_id, None)
 
-# ===== WEBHOOK ROUTES =====
+# ===== WEBHOOK =====
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode("UTF-8")
-    update = telebot.types.Update.de_json(json_str)
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
     bot.process_new_updates([update])
     return "OK", 200
 
 @app.route("/")
 def home():
-    return "Bot is running!"
+    return "Bot running!"
 
-# ===== SET WEBHOOK =====
-bot.remove_webhook()
-bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
-
-# ===== RUN =====
+# ===== START =====
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
